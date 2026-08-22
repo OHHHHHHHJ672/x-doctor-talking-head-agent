@@ -7,19 +7,17 @@ import { useProjectStore } from './store/useProjectStore'
 
 function App() {
   const isApiModalOpen = useProjectStore((s) => s.isApiModalOpen)
-  const isAuthenticated = useProjectStore((s) => s.isAuthenticated)
+  const isServerConnected = useProjectStore((s) => s.isServerConnected)
   const toggleApiModal = useProjectStore((s) => s.toggleApiModal)
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
-  const quota = useProjectStore((s) => s.quota)
-  const authUser = useProjectStore((s) => s.authUser)
   const activeProjectName = projects.find((item) => item.id === activeProjectId)?.name ?? '未命名项目'
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isServerConnected) {
       toggleApiModal(true)
     }
-  }, [isAuthenticated, toggleApiModal])
+  }, [isServerConnected, toggleApiModal])
 
   return (
     <div className="app-root">
@@ -43,10 +41,10 @@ function App() {
             <p className="topbar-project-subtitle">当前项目 · 文案 → 素材 → 字幕与封面</p>
           </div>
           <div className="topbar-right">
-            <p className="topbar-user">{authUser ? `已登录 ${authUser.username}` : '未登录'}</p>
-            <p className="topbar-points">剩余 {quota?.remainingPoints.toLocaleString() ?? '--'} 次生成</p>
+            <p className="topbar-user">RunningHub</p>
+            <p className="topbar-points">{isServerConnected ? '连接正常' : '等待配置'}</p>
             <button className="btn-secondary" onClick={() => toggleApiModal(true)}>
-              账户与设置
+              RunningHub 设置
             </button>
           </div>
         </header>

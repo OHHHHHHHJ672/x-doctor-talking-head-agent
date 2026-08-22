@@ -1,24 +1,42 @@
-# Logs
-logs
+# Dependencies and builds
+node_modules/
+dist/
+dist-ssr/
+coverage/
+*.tsbuildinfo
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*cookie*.txt
+credentials*.json
+
+# User and generated data
+user-data/
+logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.srt
 
-node_modules
-dist
-dist-ssr
-*.local
+# Models and bundled tools
+faster_whisper_models/
+openai_whisper_models/
+bin/
+*.exe
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# Python and editor caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.vscode/
+.idea/
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db

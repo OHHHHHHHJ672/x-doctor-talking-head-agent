@@ -29,10 +29,18 @@ export function Step5Subtitle() {
     previewVideoUrl,
   } = useProjectStore((s) => s)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const pollRef = useRef<number | null>(null)
+  const transcribedVideoRef = useRef('')
   const [composing, setComposing] = useState(false)
   const [composeStatus, setComposeStatus] = useState('待植入标题与字幕')
-  const [subtitleLoading, setSubtitleLoading] = useState(false)
+  const settingsFingerprint = JSON.stringify([
+    coverTitle,
+    coverStyle,
+    subtitleStyle,
+    subtitleText,
+    selectedAvatarId,
+    selectedRewriteId,
+  ])
+  const previousSettingsRef = useRef(settingsFingerprint)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -42,17 +50,15 @@ export function Step5Subtitle() {
   }, [])
 
   useEffect(() => {
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (composing) return
-    setPreviewComposed(false)
-    setStepState(3, 'running')
-    setComposeStatus('参数已变更，请重新植入并预览')
-  }, [coverTitle, coverStyle, subtitleStyle, subtitleText, selectedAvatarId, selectedRewriteId])
+    if (previousSettingsRef.current === settingsFingerprint) return
+    previousSettingsRef.current = settingsFingerprint
+    const timer = window.setTimeout(() => {
+      setPreviewComposed(false)
+      setStepState(3, 'running')
+      setComposeStatus('参数已变更，请重新植入并预览')
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [settingsFingerprint, setPreviewComposed, setStepState])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -83,22 +89,30 @@ export function Step5Subtitle() {
   }, [coverTitle, coverStyle, subtitleStyle, subtitleText, avatars, selectedAvatarId])
 
   useEffect(() => {
-    if (!previewVideoUrl || subtitleText.trim() || subtitleLoading) return
-    setSubtitleLoading(true)
-    void transcribeSubtitleFromVideoUrl(previewVideoUrl)
-      .then((data) => {
-        const text = String(data.text || '').trim()
-        if (text) {
-          setSubtitleText(text)
-          addToast({ type: 'success', message: '已自动提取字幕，可继续编辑' })
-        }
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : '自动提取字幕失败'
-        addToast({ type: 'error', message })
-      })
-      .finally(() => setSubtitleLoading(false))
-  }, [previewVideoUrl, subtitleText, subtitleLoading, setSubtitleText, addToast])
+    if (!previewVideoUrl || subtitleText.trim() || transcribedVideoRef.current === previewVideoUrl) return
+    transcribedVideoRef.current = previewVideoUrl
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void transcribeSubtitleFromVideoUrl(previewVideoUrl)
+        .then((data) => {
+          if (cancelled) return
+          const text = String(data.text || '').trim()
+          if (text) {
+            setSubtitleText(text)
+            addToast({ type: 'success', message: '已自动提取字幕，可继续编辑' })
+          }
+        })
+        .catch((error) => {
+          if (cancelled) return
+          const message = error instanceof Error ? error.message : '自动提取字幕失败'
+          addToast({ type: 'error', message })
+        })
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [previewVideoUrl, subtitleText, setSubtitleText, addToast])
 
   return (
     <div className="merged-step-layout">

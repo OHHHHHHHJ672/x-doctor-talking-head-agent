@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -264,7 +265,7 @@ def download_with_ytdlp(url: str, platform: str, template: str, cookies_path: Pa
 
 
 def main() -> None:
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 4:
         emit({"ok": False, "code": "bad_args", "error": "missing args"})
         return
 
@@ -273,8 +274,7 @@ def main() -> None:
     url = "" if local_media else normalize_input_url(raw_input)
     project_root = Path(sys.argv[2])
     ffmpeg_path = Path(sys.argv[3])
-    model_dir = Path(sys.argv[4])
-    platform_hint = str(sys.argv[5]).strip().lower() if len(sys.argv) > 5 else ""
+    platform_hint = str(sys.argv[4]).strip().lower() if len(sys.argv) > 4 else ""
     platform = "local" if local_media else (platform_hint if platform_hint in {"bilibili", "douyin"} else detect_video_platform(url))
     ffmpeg_bin_dir = ffmpeg_path.parent
 
@@ -282,12 +282,13 @@ def main() -> None:
         emit({"ok": False, "code": "invalid_url", "error": "未识别到有效视频链接，请粘贴单条视频分享链接（不要用抖音主页/精选页）"})
         return
 
-    if not ffmpeg_path.exists():
+    ffmpeg_command = str(ffmpeg_path) if ffmpeg_path.exists() else shutil.which(str(ffmpeg_path))
+    if not ffmpeg_command:
         emit({"ok": False, "code": "ffmpeg_missing", "error": "请先安装 ffmpeg 并添加到系统 PATH"})
         return
 
     try:
-        run_cmd([str(ffmpeg_path), "-version"])
+        run_cmd([ffmpeg_command, "-version"])
     except Exception:
         emit({"ok": False, "code": "ffmpeg_missing", "error": "请先安装 ffmpeg 并添加到系统 PATH"})
         return
@@ -323,18 +324,18 @@ def main() -> None:
     wav_path = output_dir / "source_audio.wav"
     if audio_path.suffix.lower() != ".wav":
         try:
-            run_cmd([str(ffmpeg_path), "-y", "-i", str(audio_path), str(wav_path)])
+            run_cmd([ffmpeg_command, "-y", "-i", str(audio_path), str(wav_path)])
         except Exception:
             emit({"ok": False, "code": "ffmpeg_missing", "error": "请先安装 ffmpeg 并添加到系统 PATH"})
             return
     else:
         wav_path = audio_path
 
-    whisper_wav = output_dir / "whisper_input.wav"
+    asr_wav = output_dir / "asr_input.wav"
     try:
         run_cmd(
             [
-                str(ffmpeg_path),
+                ffmpeg_command,
                 "-y",
                 "-i",
                 str(wav_path),
@@ -344,85 +345,14 @@ def main() -> None:
                 "16000",
                 "-sample_fmt",
                 "s16",
-                str(whisper_wav),
+                str(asr_wav),
             ]
         )
     except Exception:
         emit({"ok": False, "code": "ffmpeg_missing", "error": "请先安装 ffmpeg 并添加到系统 PATH"})
         return
 
-    segments_payload: list[dict] = []
-    text = ""
-
-    def transcribe_with_faster_whisper(disable_vad: bool) -> tuple[list[dict], str]:
-        from faster_whisper import WhisperModel
-
-        model = WhisperModel(str(model_dir / "base"), device="cpu", compute_type="float32")
-        segments, _ = model.transcribe(
-            str(whisper_wav),
-            language="zh",
-            task="transcribe",
-            beam_size=5,
-            vad_filter=not disable_vad,
-            initial_prompt="以下是简体中文口播内容。",
-        )
-        segs: list[dict] = []
-        for seg in segments:
-            segs.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
-        joined = "\n".join([line["text"] for line in segs if line["text"]])
-        return segs, joined
-
-    if module_available("faster_whisper"):
-        try:
-            segments_payload, text = transcribe_with_faster_whisper(disable_vad=False)
-            # 一些素材在人声较弱时，VAD 会过滤掉有效片段；空结果时重试一次关闭 VAD。
-            if not text.strip():
-                segments_payload, text = transcribe_with_faster_whisper(disable_vad=True)
-        except Exception as exc:
-            emit({"ok": False, "code": "whisper_failed", "error": f"转写失败: {exc}"})
-            return
-    elif module_available("whisper"):
-        try:
-            import whisper
-
-            download_root = project_root / "openai_whisper_models"
-            download_root.mkdir(parents=True, exist_ok=True)
-            model = whisper.load_model("base", download_root=str(download_root))
-            result = model.transcribe(str(whisper_wav), language="zh")
-            text = str(result.get("text", "")).strip()
-            for seg in result.get("segments", []) or []:
-                segments_payload.append(
-                    {
-                        "start": float(seg.get("start", 0)),
-                        "end": float(seg.get("end", 0)),
-                        "text": str(seg.get("text", "")).strip(),
-                    }
-                )
-        except Exception as exc:
-            emit({"ok": False, "code": "whisper_failed", "error": f"转写失败: {exc}"})
-            return
-    else:
-        emit(
-            {
-                "ok": False,
-                "code": "whisper_missing",
-                "error": "未检测到 faster-whisper 或 openai-whisper，请先运行：pip install faster-whisper",
-            },
-        )
-        return
-
-    if not text.strip():
-        emit(
-            {
-                "ok": False,
-                "code": "empty_transcript",
-                "error": "未识别到有效语音内容（可能是静音、背景音过大或音量过低），请更换素材或提高音量后重试",
-                "platform": platform,
-            },
-        )
-        return
-
-    emit({"ok": True, "text": text, "segments": segments_payload, "platform": platform})
+    emit({"ok": True, "audioPath": str(asr_wav), "platform": platform})
 
 
 if __name__ == "__main__":

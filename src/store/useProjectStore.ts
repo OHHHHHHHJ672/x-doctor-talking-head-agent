@@ -1,6 +1,4 @@
 import { create } from 'zustand'
-import { getSavedUser } from '../lib/edgeApi'
-import type { AuthUser } from '../lib/edgeApi'
 
 export type StepState = 'pending' | 'running' | 'done'
 export type ToastType = 'success' | 'error' | 'loading'
@@ -30,9 +28,8 @@ interface StoreState {
   activeProjectId: string
   steps: ProjectStep[]
   activeStep: number
-  previewTab: 'preview' | 'copy' | 'history'
+  previewTab: 'preview' | 'copy'
   isApiModalOpen: boolean
-  selectedPlatforms: string[]
   rewriteVariants: Array<{
     id: 'A' | 'B' | 'C'
     name: string
@@ -73,24 +70,12 @@ interface StoreState {
     bold: boolean
   }
   isServerConnected: boolean
-  quota: {
-    remainingPoints: number
-    usedPointsThisMonth: number
-    videosGenerated: number
-    videoCostPerItem: number
-    audioCloneCount: number
-    rewriteCount: number
-  } | null
-  quotaLoading: boolean
-  authUser: AuthUser | null
-  isAuthenticated: boolean
   toasts: ToastItem[]
   addProject: () => void
   selectProject: (id: string) => void
   setActiveStep: (id: number) => void
-  setPreviewTab: (tab: 'preview' | 'copy' | 'history') => void
+  setPreviewTab: (tab: 'preview' | 'copy') => void
   toggleApiModal: (open?: boolean) => void
-  togglePlatform: (platform: string) => void
   setSelectedRewrite: (id: 'A' | 'B' | 'C') => void
   setRewriteVariants: (
     variants: Array<{
@@ -123,11 +108,9 @@ interface StoreState {
   setPreviewComposed: (composed: boolean) => void
   completeStep: (id: number) => void
   setStepState: (id: number, state: StepState) => void
-  setQuota: (quota: StoreState['quota']) => void
-  setQuotaLoading: (loading: boolean) => void
+  setServerConnected: (connected: boolean) => void
   addToast: (toast: Omit<ToastItem, 'id'>) => void
   removeToast: (id: string) => void
-  setAuthUser: (user: AuthUser | null) => void
 }
 
 const defaultSteps: ProjectStep[] = [
@@ -135,8 +118,6 @@ const defaultSteps: ProjectStep[] = [
   { id: 2, title: '02 视频生成', description: '上传音频与形象素材，提交服务器生成视频', state: 'pending' },
   { id: 3, title: '03 添加字幕', description: '调整标题与字幕样式并生成预览', state: 'pending' },
 ]
-
-const savedUser = getSavedUser()
 
 export const useProjectStore = create<StoreState>((set) => ({
   projects: [
@@ -147,7 +128,6 @@ export const useProjectStore = create<StoreState>((set) => ({
   activeStep: 1,
   previewTab: 'preview',
   isApiModalOpen: false,
-  selectedPlatforms: [],
   rewriteVariants: [
     { id: 'A', name: 'AI 智能改写', similarity: '结构重构', preview: '', fullText: '' },
     { id: 'B', name: '备用', similarity: '-', preview: '', fullText: '' },
@@ -183,11 +163,7 @@ export const useProjectStore = create<StoreState>((set) => ({
     strokeWidth: 2,
     bold: true,
   },
-  isServerConnected: true,
-  quota: null,
-  quotaLoading: false,
-  authUser: savedUser,
-  isAuthenticated: Boolean(savedUser),
+  isServerConnected: false,
   toasts: [],
   addProject: () =>
     set((state) => {
@@ -210,15 +186,6 @@ export const useProjectStore = create<StoreState>((set) => ({
     set((state) => ({
       isApiModalOpen: typeof open === 'boolean' ? open : !state.isApiModalOpen,
     })),
-  togglePlatform: (platform) =>
-    set((state) => {
-      const exists = state.selectedPlatforms.includes(platform)
-      return {
-        selectedPlatforms: exists
-          ? state.selectedPlatforms.filter((p) => p !== platform)
-          : [...state.selectedPlatforms, platform],
-      }
-    }),
   setSelectedRewrite: (id) => set({ selectedRewriteId: id }),
   setRewriteVariants: (variants) => set({ rewriteVariants: variants }),
   updateRewriteText: (text) =>
@@ -274,16 +241,10 @@ export const useProjectStore = create<StoreState>((set) => ({
       steps: state.steps.map((step) => (step.id === id ? { ...step, state: stepState } : step)),
       activeStep: stepState === 'running' ? id : state.activeStep,
     })),
-  setQuota: (quota) => set({ quota }),
-  setQuotaLoading: (loading) => set({ quotaLoading: loading }),
+  setServerConnected: (connected) => set({ isServerConnected: connected }),
   addToast: (toast) =>
     set((state) => ({
       toasts: [{ id: crypto.randomUUID(), ...toast }, ...state.toasts].slice(0, 3),
     })),
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
-  setAuthUser: (user) =>
-    set({
-      authUser: user,
-      isAuthenticated: Boolean(user),
-    }),
 }))

@@ -9,8 +9,6 @@ export function Sidebar() {
     selectProject,
     toggleApiModal,
     isServerConnected,
-    quota,
-    authUser,
   } = useProjectStore()
 
   return (
@@ -58,9 +56,9 @@ export function Sidebar() {
       <footer className="server-footer" onClick={() => toggleApiModal(true)}>
         <div className="server-line">
           <span className={`server-dot ${isServerConnected ? 'ok' : 'bad'}`} />
-          <span>{authUser ? `已登录 ${authUser.username}` : '未登录（点击登录）'}</span>
+          <span>{isServerConnected ? 'RunningHub 已连接' : '点击配置 RunningHub'}</span>
         </div>
-        <p className="server-points">剩余 {quota?.remainingPoints.toLocaleString() ?? '--'} pts</p>
+        <p className="server-points">使用你自己的 API Key</p>
       </footer>
     </aside>
   )

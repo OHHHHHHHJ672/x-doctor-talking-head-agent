@@ -34,7 +34,6 @@ export function Step3Audio() {
     completeStep,
     setPreviewVideoUrl,
     setPreviewComposed,
-    quota,
     rewriteVariants,
     selectedRewriteId,
   } = useProjectStore()
@@ -184,11 +183,6 @@ export function Step3Audio() {
         onClick={async () => {
           try {
             setTaskStatus('正在校验提交条件...')
-            if (quota && quota.remainingPoints < (quota.videoCostPerItem || 0)) {
-              setTaskStatus('失败：剩余点数不足')
-              addToast({ type: 'error', message: '剩余点数不足，无法提交数字人任务' })
-              return
-            }
             setSubmitting(true)
             setPreviewComposed(false)
             const audioFile = pendingAudioFile
@@ -277,7 +271,7 @@ export function Step3Audio() {
           }
         }}
       >
-        {submitting ? '任务提交中...' : '提交至服务器生成视频'}
+        {submitting ? '任务提交中...' : '提交至 RunningHub 生成视频'}
       </button>
       <p className="hint">预计 2-5 分钟 · 完成后自动进入下一步 · {taskStatus}</p>
     </div>
