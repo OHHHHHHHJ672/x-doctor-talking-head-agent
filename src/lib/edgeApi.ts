@@ -128,6 +128,12 @@ export interface RunningHubPublicConfig {
       textField: string
     }
   }
+  readiness: {
+    coreReady: boolean
+    digitalHumanConfigured: boolean
+    asrConfigured: boolean
+    rewriteConfigured: boolean
+  }
 }
 
 export const fetchRunningHubConfig = () =>
@@ -139,12 +145,15 @@ export const saveRunningHubConfig = (input: {
   workflows: {
     asr: { workflowId: string }
     rewrite: { workflowId: string }
-    digitalHuman: { workflowId: string }
+    digitalHuman?: { workflowId: string }
   }
 }) => requestJson<RunningHubPublicConfig>('/api/runninghub/config', { method: 'POST', body: input, envelope: true })
 
 export const testRunningHubConnection = () =>
-  requestJson<{ message?: string }>('/api/runninghub/test', { method: 'POST', envelope: true })
+  requestJson<{
+    message: string
+    checks: Array<{ key: string; label: string; workflowId: string; required: boolean; ok: boolean }>
+  }>('/api/runninghub/test', { method: 'POST', envelope: true })
 
 const taskIdFromPayload = (payload: unknown): string => {
   const o = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}

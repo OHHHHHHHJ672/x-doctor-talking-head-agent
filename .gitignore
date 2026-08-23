@@ -1,5 +1,7 @@
 # Dependencies and builds
 node_modules/
+.runtime/
+.venv/
 dist/
 dist-ssr/
 coverage/

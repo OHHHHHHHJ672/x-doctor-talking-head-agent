@@ -1,4 +1,4 @@
-import { Check, UploadCloud } from 'lucide-react'
+import { Check, CircleStop, Mic2, UploadCloud, Video } from 'lucide-react'
 import type { ChangeEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -36,6 +36,8 @@ export function Step3Audio() {
     setPreviewComposed,
     rewriteVariants,
     selectedRewriteId,
+    extractedCopy,
+    isServerConnected,
   } = useProjectStore()
   const [taskStatus, setTaskStatus] = useState('待提交')
   const [submitting, setSubmitting] = useState(false)
@@ -44,6 +46,9 @@ export function Step3Audio() {
   const [audioUploadProgress, setAudioUploadProgress] = useState(0)
   const [videoUploadProgress, setVideoUploadProgress] = useState(0)
   const pollRef = useRef<number | null>(null)
+  const pollStartedAtRef = useRef(0)
+  const activeRewrite = rewriteVariants.find((item) => item.id === selectedRewriteId)
+  const activeText = (activeRewrite?.fullText || extractedCopy).trim()
 
   useEffect(() => {
     return () => {
@@ -54,6 +59,11 @@ export function Step3Audio() {
   const handleAudioUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
+    if (file.size > 500 * 1024 * 1024) {
+      addToast({ type: 'error', message: '音频不能超过 500 MB' })
+      event.target.value = ''
+      return
+    }
     setPendingAudioFile(file)
     setSubmittedAudio({ name: file.name, duration: '待上传' })
     addToast({ type: 'success', message: '音频已选择，点击提交后开始上传' })
@@ -62,6 +72,11 @@ export function Step3Audio() {
   const onVideoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
+    if (file.size > 2 * 1024 * 1024 * 1024) {
+      addToast({ type: 'error', message: '人物视频不能超过 2 GB' })
+      event.target.value = ''
+      return
+    }
     setPendingVideoFile(file)
     addToast({ type: 'success', message: '视频已选择，点击提交后开始上传' })
   }
@@ -70,7 +85,7 @@ export function Step3Audio() {
     <div className="step-pane material-pane">
       <div className="material-grid">
         <div className="material-col">
-          <p className="material-title">🎵 参考音频</p>
+          <p className="material-title"><Mic2 size={16} /> 参考音频</p>
           <label className={`material-upload ${submittedAudio ? 'uploaded' : ''}`}>
             <UploadCloud size={16} />
             上传音频文件
@@ -80,7 +95,7 @@ export function Step3Audio() {
           {submittedAudio && (
             <>
               <p className="material-ok">
-                ✓ {submittedAudio.name} {submittedAudio.duration}
+                <Check size={14} /> {submittedAudio.name} {submittedAudio.duration}
                 <button
                   type="button"
                   className="text-link"
@@ -113,7 +128,7 @@ export function Step3Audio() {
           )}
         </div>
         <div className="material-col with-divider">
-          <p className="material-title">🎬 数字人视频</p>
+          <p className="material-title"><Video size={16} /> 人物视频</p>
           <label className={`material-upload ${avatars.length > 0 ? 'uploaded' : ''}`}>
             <UploadCloud size={16} />
             上传视频文件
@@ -177,9 +192,10 @@ export function Step3Audio() {
           )}
         </div>
       </div>
+      <div className="generation-actions">
       <button
         className="btn-primary full"
-        disabled={!pendingAudioFile || !pendingVideoFile || submitting}
+        disabled={!pendingAudioFile || !pendingVideoFile || !activeText || !isServerConnected || submitting}
         onClick={async () => {
           try {
             setTaskStatus('正在校验提交条件...')
@@ -216,22 +232,23 @@ export function Step3Audio() {
               videoPath: avatarData.videoPath || avatarData.fileRef || '',
               thumbnailPath: avatarData.thumbnailPath || '/placeholder-avatar.svg',
             })
-            const activeRewrite = rewriteVariants.find((item) => item.id === selectedRewriteId)
             setTaskStatus('素材上传完成，正在提交数字人任务...')
             const submitData = await submitDigitalHuman({
               avatarVideoPath: avatarData.videoPath || avatarData.fileRef,
               audioName: audioData.name || convertedAudio.name,
               audioPath: audioData.audioPath || audioData.fileRef,
-              rewriteText: activeRewrite?.fullText || '',
+              rewriteText: activeText,
             })
             setTaskStatus('已提交，处理中...')
             setAudioUploadProgress(100)
             setVideoUploadProgress(100)
-            setPendingAudioFile(null)
-            setPendingVideoFile(null)
             if (pollRef.current) window.clearInterval(pollRef.current)
+            pollStartedAtRef.current = Date.now()
             pollRef.current = window.setInterval(async () => {
               try {
+                if (Date.now() - pollStartedAtRef.current > 30 * 60 * 1000) {
+                  throw new Error('等待已超过 30 分钟。RunningHub 任务可能仍在执行，请稍后重新打开结果。')
+                }
                 const statusData = await fetchDigitalHumanStatus(submitData.taskId)
                 const upstream = statusLabel((statusData as { upstreamStatus?: string }).upstreamStatus)
                 setTaskStatus(`${upstream ? `${upstream} · ` : ''}处理中 ${statusData.progress}%`)
@@ -239,6 +256,8 @@ export function Step3Audio() {
                   if (pollRef.current) window.clearInterval(pollRef.current)
                   pollRef.current = null
                   setTaskStatus('处理完成，进入下一步')
+                  setPendingAudioFile(null)
+                  setPendingVideoFile(null)
                   const serverVideoPath = (statusData as { videoPath?: string }).videoPath
                   if (serverVideoPath) {
                     setPreviewVideoUrl(resolveAssetUrl(serverVideoPath))
@@ -273,7 +292,24 @@ export function Step3Audio() {
       >
         {submitting ? '任务提交中...' : '提交至 RunningHub 生成视频'}
       </button>
-      <p className="hint">预计 2-5 分钟 · 完成后自动进入下一步 · {taskStatus}</p>
+      {submitting && (
+        <button
+          className="btn-secondary stop-waiting"
+          type="button"
+          onClick={() => {
+            if (pollRef.current) window.clearInterval(pollRef.current)
+            pollRef.current = null
+            setSubmitting(false)
+            setTaskStatus('已停止本地等待；RunningHub 云端任务可能仍在执行')
+          }}
+        >
+          <CircleStop size={16} /> 停止等待
+        </button>
+      )}
+      </div>
+      {!isServerConnected && <p className="inline-alert">请先点击右上角“RunningHub 设置”，填写并测试 API Key。</p>}
+      {!activeText && <p className="inline-alert">请先在步骤 1 准备口播文案。</p>}
+      <p className="hint">通常需要 2-10 分钟。停止等待只停止本地轮询，不会取消 RunningHub 已创建的任务。当前状态：{taskStatus}</p>
     </div>
   )
 }

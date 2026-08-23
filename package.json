@@ -1,12 +1,16 @@
 {
   "name": "x-doctor-talking-head-agent",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "dev:api": "node server/local-api.mjs",
+    "start": "node server/local-api.mjs",
     "test": "node --test server/*.test.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

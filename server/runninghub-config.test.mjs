@@ -4,7 +4,56 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { createRunningHubConfigStore } from './runninghub-config.mjs'
+import {
+  DEFAULT_RUNNINGHUB_CONFIG,
+  createRunningHubConfigStore,
+  getConfiguredWorkflowChecks,
+  getWorkflowReadiness,
+} from './runninghub-config.mjs'
+
+test('digital-human workflow ships as a supported built-in preset', () => {
+  assert.deepEqual(DEFAULT_RUNNINGHUB_CONFIG.workflows.digitalHuman, {
+    workflowId: '2091491962556866562',
+    videoNodeId: '40',
+    videoField: 'video',
+    audioNodeId: '37',
+    audioField: 'audio',
+    textNodeId: '58',
+    textField: 'text',
+  })
+})
+
+test('readiness requires an API key and the built-in digital-human workflow', () => {
+  assert.deepEqual(getWorkflowReadiness(DEFAULT_RUNNINGHUB_CONFIG), {
+    coreReady: false,
+    digitalHumanConfigured: true,
+    asrConfigured: false,
+    rewriteConfigured: false,
+  })
+
+  assert.equal(
+    getWorkflowReadiness({ ...DEFAULT_RUNNINGHUB_CONFIG, apiKey: 'user-key' }).coreReady,
+    true,
+  )
+})
+
+test('connection checks always include digital human and only configured optional workflows', () => {
+  assert.deepEqual(getConfiguredWorkflowChecks(DEFAULT_RUNNINGHUB_CONFIG), [
+    { key: 'digitalHuman', label: '数字人生成', workflowId: '2091491962556866562', required: true },
+  ])
+
+  const configured = {
+    ...DEFAULT_RUNNINGHUB_CONFIG,
+    workflows: {
+      ...DEFAULT_RUNNINGHUB_CONFIG.workflows,
+      asr: { ...DEFAULT_RUNNINGHUB_CONFIG.workflows.asr, workflowId: 'asr-id' },
+    },
+  }
+  assert.deepEqual(getConfiguredWorkflowChecks(configured), [
+    { key: 'digitalHuman', label: '数字人生成', workflowId: '2091491962556866562', required: true },
+    { key: 'asr', label: '视频转写（可选）', workflowId: 'asr-id', required: false },
+  ])
+})
 
 test('configuration reads environment overrides and masks the key', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'rh-config-'))
@@ -20,6 +69,23 @@ test('configuration reads environment overrides and masks the key', async () => 
   assert.equal(config.baseUrl, 'https://rh.example')
   assert.equal(publicConfig.apiKeyConfigured, true)
   assert.equal('apiKey' in publicConfig, false)
+  assert.equal(publicConfig.readiness.coreReady, true)
+})
+
+test('saving cannot replace the supported digital-human preset', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'rh-config-'))
+  const filePath = path.join(dir, 'settings.json')
+  const store = createRunningHubConfigStore({ filePath, env: {} })
+
+  await store.save({
+    apiKey: 'stored-key',
+    workflows: {
+      digitalHuman: { workflowId: 'other', videoNodeId: '999' },
+    },
+  })
+  const saved = JSON.parse(await readFile(filePath, 'utf8'))
+
+  assert.deepEqual(saved.workflows.digitalHuman, DEFAULT_RUNNINGHUB_CONFIG.workflows.digitalHuman)
 })
 
 test('saving merges a masked key without overwriting the stored secret', async () => {

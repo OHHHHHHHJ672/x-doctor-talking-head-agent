@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 
 import { RunningHubClient, RunningHubError, normalizeOutputs, taskStateFromPayload } from './runninghub-client.mjs'
@@ -51,6 +54,29 @@ test('upload uses bearer authentication and returns a file reference', async () 
   assert.equal(fileRef, 'openapi/input.mp3')
   assert.equal(call.init.headers.Authorization, 'Bearer rh-secret')
   assert.ok(call.init.body instanceof FormData)
+})
+
+test('uploadFile streams a file-backed blob without loading it into a Buffer first', async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'rh-upload-'))
+  const filePath = path.join(directory, 'input.mp3')
+  await writeFile(filePath, 'audio-from-disk')
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  let uploadedFile
+  const client = new RunningHubClient({
+    apiKey: 'rh-secret',
+    fetchImpl: async (_url, init) => {
+      uploadedFile = init.body.get('file')
+      return jsonResponse({ code: 0, data: { fileName: 'openapi/input.mp3' } })
+    },
+  })
+
+  const fileRef = await client.uploadFile(filePath, 'audio/mpeg')
+
+  assert.equal(fileRef, 'openapi/input.mp3')
+  assert.equal(uploadedFile.name, 'input.mp3')
+  assert.equal(uploadedFile.type, 'audio/mpeg')
+  assert.equal(await uploadedFile.text(), 'audio-from-disk')
 })
 
 test('normalizeOutputs accepts common RunningHub output shapes', () => {

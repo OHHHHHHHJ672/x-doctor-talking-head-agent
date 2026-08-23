@@ -1,3 +1,6 @@
+import { openAsBlob } from 'node:fs'
+import path from 'node:path'
+
 const DEFAULT_BASE_URL = 'https://www.runninghub.ai'
 
 export class RunningHubError extends Error {
@@ -89,6 +92,21 @@ export class RunningHubClient {
   async uploadBuffer(buffer, filename, contentType = 'application/octet-stream') {
     const body = new FormData()
     body.append('file', new Blob([buffer], { type: contentType }), filename)
+    const payload = await this.request('/openapi/v2/media/upload/binary', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      body,
+    })
+    const data = unwrapData(payload) || {}
+    const fileRef = String(data.fileName ?? data.fileRef ?? data.filePath ?? payload.fileName ?? '')
+    if (!fileRef) throw new RunningHubError('RunningHub 上传响应缺少文件引用')
+    return fileRef
+  }
+
+  async uploadFile(filePath, contentType = 'application/octet-stream', filename = path.basename(filePath)) {
+    const body = new FormData()
+    const file = await openAsBlob(filePath, { type: contentType })
+    body.append('file', file, filename)
     const payload = await this.request('/openapi/v2/media/upload/binary', {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.apiKey}` },

@@ -1,6 +1,7 @@
 import { resolveAssetUrl, rewriteCopySmart } from '../../lib/edgeApi'
 import { useProjectStore } from '../../store/useProjectStore'
 import { useState } from 'react'
+import { Download, ExternalLink } from 'lucide-react'
 
 export function PreviewPanel() {
   const {
@@ -22,6 +23,8 @@ export function PreviewPanel() {
   const [regenerating, setRegenerating] = useState(false)
   const previewReady = steps.find((step) => step.id === 3)?.state === 'done' && previewComposed
   const activeRewrite = rewriteVariants.find((item) => item.id === selectedRewriteId)
+  const activeText = (activeRewrite?.fullText || extractedCopy).trim()
+  const resultUrl = previewVideoUrl ? resolveAssetUrl(previewVideoUrl) : ''
 
   return (
     <aside className="preview-panel">
@@ -40,17 +43,27 @@ export function PreviewPanel() {
             <p className="panel-kicker">结果预览</p>
             <div className="video-viewport">
               {previewVideoUrl ? (
-                <video className="preview-video" src={resolveAssetUrl(previewVideoUrl)} controls playsInline />
+                <video className="preview-video" src={resultUrl} controls playsInline />
               ) : (
                 <span className="preview-empty">9:16 视频预览区</span>
               )}
             </div>
             <p className="muted preview-summary">
-              文案摘要：这条视频将从用户需求、内容结构与转化动作三层，快速讲清爆款口播的执行路径...
+              {activeText ? `当前文案：${activeText.slice(0, 88)}${activeText.length > 88 ? '...' : ''}` : '准备文案后，这里会显示真实内容摘要。'}
             </p>
+            {resultUrl && (
+              <div className="result-actions">
+                <a className="btn-primary" href={resultUrl} download="x-doctor-result.mp4">
+                  <Download size={16} /> 下载当前成片
+                </a>
+                <a className="btn-secondary" href={resultUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink size={16} /> 新窗口查看
+                </a>
+              </div>
+            )}
             {!previewComposed && (
               <div className="preview-ready-panel is-pending">
-                <p className="preview-ready-title">请先在步骤 3 点击“添加标题和字幕并预览”。</p>
+                <p className="preview-ready-title">数字人成片生成后，可在步骤 3 添加标题和字幕。</p>
               </div>
             )}
             {previewReady && (

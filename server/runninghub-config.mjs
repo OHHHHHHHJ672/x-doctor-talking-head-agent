@@ -8,12 +8,12 @@ export const DEFAULT_RUNNINGHUB_CONFIG = Object.freeze({
     asr: { workflowId: '', audioNodeId: '1', audioField: 'audio' },
     rewrite: { workflowId: '', textNodeId: '1', textField: 'text' },
     digitalHuman: {
-      workflowId: '',
-      videoNodeId: '1',
-      videoField: 'file',
-      audioNodeId: '7',
+      workflowId: '2091491962556866562',
+      videoNodeId: '40',
+      videoField: 'video',
+      audioNodeId: '37',
       audioField: 'audio',
-      textNodeId: '24',
+      textNodeId: '58',
       textField: 'text',
     },
   },
@@ -22,8 +22,43 @@ export const DEFAULT_RUNNINGHUB_CONFIG = Object.freeze({
 const mergeWorkflows = (base, incoming = {}) => ({
   asr: { ...base.asr, ...(incoming.asr || {}) },
   rewrite: { ...base.rewrite, ...(incoming.rewrite || {}) },
-  digitalHuman: { ...base.digitalHuman, ...(incoming.digitalHuman || {}) },
+  digitalHuman: { ...DEFAULT_RUNNINGHUB_CONFIG.workflows.digitalHuman },
 })
+
+export const getWorkflowReadiness = (config) => ({
+  coreReady: Boolean(config.apiKey && config.workflows.digitalHuman.workflowId),
+  digitalHumanConfigured: Boolean(config.workflows.digitalHuman.workflowId),
+  asrConfigured: Boolean(config.workflows.asr.workflowId),
+  rewriteConfigured: Boolean(config.workflows.rewrite.workflowId),
+})
+
+export const getConfiguredWorkflowChecks = (config) => {
+  const checks = [
+    {
+      key: 'digitalHuman',
+      label: '数字人生成',
+      workflowId: config.workflows.digitalHuman.workflowId,
+      required: true,
+    },
+  ]
+  if (config.workflows.asr.workflowId) {
+    checks.push({
+      key: 'asr',
+      label: '视频转写（可选）',
+      workflowId: config.workflows.asr.workflowId,
+      required: false,
+    })
+  }
+  if (config.workflows.rewrite.workflowId) {
+    checks.push({
+      key: 'rewrite',
+      label: '文案改写（可选）',
+      workflowId: config.workflows.rewrite.workflowId,
+      required: false,
+    })
+  }
+  return checks
+}
 
 const normalize = (input = {}) => ({
   baseUrl: String(input.baseUrl || DEFAULT_RUNNINGHUB_CONFIG.baseUrl).trim().replace(/\/$/, ''),
@@ -82,6 +117,7 @@ export const createRunningHubConfigStore = ({ filePath, env = process.env }) => 
       baseUrl: config.baseUrl,
       apiKeyConfigured: Boolean(config.apiKey),
       workflows: config.workflows,
+      readiness: getWorkflowReadiness(config),
     }
   },
 })

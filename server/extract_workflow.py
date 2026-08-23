@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -293,7 +294,9 @@ def main() -> None:
         emit({"ok": False, "code": "ffmpeg_missing", "error": "请先安装 ffmpeg 并添加到系统 PATH"})
         return
 
-    output_dir = project_root / "user-data" / "extracted"
+    configured_data_root = os.environ.get("X_DOCTOR_DATA_DIR", "").strip()
+    data_root = Path(configured_data_root) if configured_data_root else project_root / "user-data"
+    output_dir = data_root / "extracted"
     output_dir.mkdir(parents=True, exist_ok=True)
     template = str(output_dir / "source_audio.%(ext)s")
 

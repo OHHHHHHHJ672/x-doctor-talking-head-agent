@@ -19,7 +19,7 @@ export function StepCard({ step, collapsed = false, summary = '', onExpand, dimm
         </span>
         <div className="step-body">
           <div className="step-title-row">
-            <p>{step.title}</p>
+            <h2>{step.title}</h2>
             {collapsed && (
               <button type="button" className="expand-link" onClick={onExpand}>
                 展开 ›

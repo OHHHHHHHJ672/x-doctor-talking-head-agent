@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { StepCard } from './StepCard'
@@ -37,17 +38,17 @@ export function StepList() {
       const selectedAvatar = avatars.find((item) => item.id === selectedAvatarId)
       return {
         1: extractedCopy
-          ? `📝 文案已提取并完成智能改写：${(selectedRewrite?.fullText || extractedCopy).slice(0, 20)}...`
-          : '📝 待提取并改写文案',
+          ? `文案已准备：${(selectedRewrite?.fullText || extractedCopy).slice(0, 20)}...`
+          : '等待输入或转写文案',
         2:
           submittedAudio && selectedAvatar
-            ? `🎵🎬 音频+形象已上传并提交完成（${submittedAudio.name} / ${selectedAvatar.name}）`
+            ? `声音与人物已生成（${submittedAudio.name} / ${selectedAvatar.name}）`
             : submittedAudio
-              ? `🎵 音频已上传：${submittedAudio.name}，待上传数字人形象`
-              : '🎵🎬 待准备素材（音频与形象）',
+              ? `声音已上传：${submittedAudio.name}，等待人物视频`
+              : '等待上传声音与人物视频',
         3: coverTitle || subtitleText
-          ? `🖼️ 封面与字幕已配置：${coverTitle.slice(0, 14)}... / 💬「${subtitleText.slice(0, 10)}...」`
-          : '🖼️ 待配置封面与字幕',
+          ? `标题与字幕已配置：${coverTitle.slice(0, 14)}... / ${subtitleText.slice(0, 10)}...`
+          : '等待配置标题、字幕与导出',
       }
     },
     [avatars, coverTitle, extractedCopy, rewriteVariants, selectedAvatarId, selectedRewriteId, submittedAudio, subtitleText],
@@ -76,21 +77,15 @@ export function StepList() {
         <span className="badge running">当前步骤 {activeStep}/3</span>
       </header>
 
-      <motion.div key={activeStep} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.12 }} className="step-scroll step-scroll-horizontal">
-        <div className="step-row">
-          {steps.map((step) => (
-            <div key={step.id} className="step-col">
-              <StepCard
-                step={step}
-                summary={stepSummary[step.id as keyof typeof stepSummary]}
-                dimmed={step.id > activeStep && step.state !== 'done'}
-                collapsed={false}
-              >
-                {stepContent[step.id]}
-              </StepCard>
-            </div>
-          ))}
-        </div>
+      <motion.div key={activeStep} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.12 }} className="step-scroll">
+        <StepCard
+          step={steps[activeStep - 1]}
+          summary={stepSummary[activeStep as keyof typeof stepSummary]}
+          dimmed={false}
+          collapsed={false}
+        >
+          {stepContent[activeStep]}
+        </StepCard>
       </motion.div>
       <footer className="flow-footer">
         <div className="flow-footer-meta">
@@ -99,10 +94,10 @@ export function StepList() {
         </div>
         <div className="flow-footer-actions">
           <button className="btn-secondary" type="button" onClick={() => canGoPrev && setActiveStep(activeStep - 1)} disabled={!canGoPrev}>
-            上一步
+            <ChevronLeft size={16} /> 上一步
           </button>
           <button className="btn-primary" type="button" onClick={() => canGoNext && setActiveStep(activeStep + 1)} disabled={!canGoNext}>
-            下一步
+            下一步 <ChevronRight size={16} />
           </button>
         </div>
       </footer>

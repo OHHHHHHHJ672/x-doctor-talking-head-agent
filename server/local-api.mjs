@@ -7,21 +7,38 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RunningHubClient, normalizeOutputs, taskStateFromPayload } from './runninghub-client.mjs'
-import { createRunningHubConfigStore } from './runninghub-config.mjs'
+import { createRunningHubConfigStore, getConfiguredWorkflowChecks } from './runninghub-config.mjs'
+import { downloadToFile, fetchTextLimited } from './safe-download.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const projectRoot = path.resolve(__dirname, '..')
+const appDataRoot = path.resolve(
+  process.env.X_DOCTOR_DATA_DIR ||
+    (process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'XDoctorTalkingHead')
+      : path.join(projectRoot, 'user-data')),
+)
+const tempRoot = path.join(appDataRoot, 'tmp')
+fs.mkdirSync(tempRoot, { recursive: true })
+const positiveLimit = (value, fallback) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+const maxMediaBytes = positiveLimit(process.env.X_DOCTOR_UPLOAD_MAX_BYTES, 2 * 1024 * 1024 * 1024)
+const maxTextDownloadBytes = 5 * 1024 * 1024
 const bundledFfmpegPath = path.join(projectRoot, 'bin', 'ffmpeg.exe')
 const ffmpegPath = fs.existsSync(bundledFfmpegPath) ? bundledFfmpegPath : 'ffmpeg'
+const pythonPath = process.env.X_DOCTOR_PYTHON || 'python'
 const runningHubConfigStore = createRunningHubConfigStore({
-  filePath: path.join(projectRoot, 'user-data', 'settings.json'),
+  filePath: path.join(appDataRoot, 'settings.json'),
 })
 
 const childEnv = {
   ...process.env,
   PYTHONUTF8: '1',
   PYTHONIOENCODING: 'utf-8',
+  X_DOCTOR_DATA_DIR: appDataRoot,
 }
 
 const logError = (title, payload) => {
@@ -57,9 +74,7 @@ const readTextOutput = async (outputs) => {
   if (direct) return String(direct).trim()
   const textOutput = outputs.find((item) => item.url)
   if (!textOutput?.url) return ''
-  const response = await fetch(textOutput.url)
-  if (!response.ok) throw new Error(`读取 RunningHub 文本结果失败(${response.status})`)
-  const raw = await response.text()
+  const raw = await fetchTextLimited(textOutput.url, { maxBytes: maxTextDownloadBytes })
   try {
     const parsed = JSON.parse(raw)
     return String(parsed.text ?? parsed.content ?? parsed.result ?? raw).trim()
@@ -85,7 +100,7 @@ const runTextWorkflow = async ({ workflow, value, kind }) => {
 const prepareAudio = (input, platform) =>
   new Promise((resolve, reject) => {
     execFile(
-      'python',
+      pythonPath,
       [path.join(projectRoot, 'server', 'extract_workflow.py'), input, projectRoot, ffmpegPath, platform],
       {
         cwd: projectRoot,
@@ -108,8 +123,7 @@ const prepareAudio = (input, platform) =>
 const transcribeWithRunningHub = async (input, platform) => {
   const prepared = await prepareAudio(input, platform)
   const { config, client } = await getRunningHubContext()
-  const audio = await fs.promises.readFile(prepared.audioPath)
-  const fileRef = await client.uploadBuffer(audio, path.basename(prepared.audioPath), 'audio/wav')
+  const fileRef = await client.uploadFile(prepared.audioPath, 'audio/wav')
   const { outputs } = await runTextWorkflow({ workflow: config.workflows.asr, value: fileRef, kind: '语音转写' })
   const text = await readTextOutput(outputs)
   if (!text) throw new Error('RunningHub 转写工作流未返回文本')
@@ -221,7 +235,7 @@ const handleExtractWorkflow = async (req, res) => {
 }
 
 const app = express()
-const upload = multer({ dest: path.join(projectRoot, 'user-data', 'tmp') })
+const upload = multer({ dest: tempRoot, limits: { fileSize: maxMediaBytes } })
 
 const isTrustedOrigin = (origin) => {
   if (!origin) return true
@@ -246,8 +260,12 @@ app.use(
   }),
 )
 app.use(express.json())
-app.use('/user-data/settings.json', (_req, res) => res.sendStatus(404))
-app.use('/user-data', express.static(path.join(projectRoot, 'user-data')))
+app.use('/user-data/tmp', express.static(tempRoot))
+app.use('/user-data/extracted', express.static(path.join(appDataRoot, 'extracted')))
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, data: { service: 'x-doctor', version: '1.1.0' } })
+})
 
 app.get('/api/runninghub/config', async (_req, res) => {
   try {
@@ -270,10 +288,19 @@ app.post('/api/runninghub/config', async (req, res) => {
 app.post('/api/runninghub/test', async (_req, res) => {
   try {
     const { config, client } = await getRunningHubContext()
-    const workflowId = [config.workflows.digitalHuman.workflowId, config.workflows.asr.workflowId, config.workflows.rewrite.workflowId].find(Boolean)
-    if (!workflowId) throw new Error('请至少填写一个 Workflow ID 后再测试连接')
-    await client.inspectWorkflow(workflowId)
-    return res.json({ ok: true, message: 'RunningHub 连接正常' })
+    const checks = getConfiguredWorkflowChecks(config)
+    const results = []
+    for (const check of checks) {
+      await client.inspectWorkflow(check.workflowId)
+      results.push({ ...check, ok: true })
+    }
+    return res.json({
+      ok: true,
+      data: {
+        message: `RunningHub 连接正常，已验证 ${results.length} 个工作流`,
+        checks: results,
+      },
+    })
   } catch (error) {
     return res.status(502).json({ ok: false, error: error instanceof Error ? error.message : '连接测试失败' })
   }
@@ -283,8 +310,11 @@ app.post('/api/v1/RH/upload', upload.single('file'), async (req, res) => {
   if (!req.file?.path) return res.status(400).json({ code: 400, msg: '请选择文件' })
   try {
     const { client } = await getRunningHubContext()
-    const buffer = await fs.promises.readFile(req.file.path)
-    const fileRef = await client.uploadBuffer(buffer, req.file.originalname || path.basename(req.file.path), req.file.mimetype)
+    const fileRef = await client.uploadFile(
+      req.file.path,
+      req.file.mimetype,
+      req.file.originalname || path.basename(req.file.path),
+    )
     return res.json({ code: 0, file_ref: fileRef, fileName: fileRef, name: req.file.originalname })
   } catch (error) {
     return res.status(502).json({ code: 502, msg: error instanceof Error ? error.message : '上传失败' })
@@ -356,7 +386,7 @@ app.post('/api/workflow/extract-file', upload.single('file'), async (req, res) =
 app.post('/api/workflow/convert-audio', upload.single('file'), (req, res) => {
   if (!req.file?.path) return res.status(400).json({ ok: false, code: 'file_required', error: '请先选择音频文件' })
   const localFile = req.file.path
-  const tmpDir = path.join(projectRoot, 'user-data', 'tmp')
+  const tmpDir = tempRoot
   fs.mkdirSync(tmpDir, { recursive: true })
   const outputPath = path.join(tmpDir, `audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.mp3`)
 
@@ -417,7 +447,7 @@ app.post('/api/workflow/convert-audio', upload.single('file'), (req, res) => {
 app.post('/api/workflow/prepare-video', upload.single('file'), (req, res) => {
   if (!req.file?.path) return res.status(400).json({ ok: false, code: 'file_required', error: '请先选择视频文件' })
   const localFile = req.file.path
-  const tmpDir = path.join(projectRoot, 'user-data', 'tmp')
+  const tmpDir = tempRoot
   fs.mkdirSync(tmpDir, { recursive: true })
   const outputPath = path.join(tmpDir, `video_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.mp4`)
 
@@ -486,15 +516,10 @@ app.post('/api/workflow/transcribe-video-url', async (req, res) => {
     }
     const ext = path.extname(parsed.pathname || '').toLowerCase() || '.mp4'
     const safeExt = ['.mp4', '.mov', '.mkv', '.avi', '.webm'].includes(ext) ? ext : '.mp4'
-    const tmpDir = path.join(projectRoot, 'user-data', 'tmp')
+    const tmpDir = tempRoot
     fs.mkdirSync(tmpDir, { recursive: true })
     tmpPath = path.join(tmpDir, `video_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${safeExt}`)
-    const response = await fetch(videoUrl)
-    if (!response.ok) {
-      return res.status(502).json({ ok: false, code: 'video_download_failed', error: `下载视频失败(${response.status})` })
-    }
-    const buf = Buffer.from(await response.arrayBuffer())
-    fs.writeFileSync(tmpPath, buf)
+    await downloadToFile(videoUrl, tmpPath, { maxBytes: maxMediaBytes })
     return res.json(await transcribeWithRunningHub(tmpPath, 'local'))
   } catch (error) {
     return res.status(502).json({ ok: false, code: 'video_transcribe_failed', error: error instanceof Error ? error.message : '视频转写失败' })
@@ -512,7 +537,7 @@ app.post('/api/workflow/burn-preview', async (req, res) => {
   const subtitleSegments = Array.isArray(req.body?.subtitleSegments) ? req.body.subtitleSegments : []
   if (!videoUrl) return res.status(400).json({ ok: false, code: 'url_required', error: '缺少视频地址' })
 
-  const tmpDir = path.join(projectRoot, 'user-data', 'tmp')
+  const tmpDir = tempRoot
   fs.mkdirSync(tmpDir, { recursive: true })
   const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const inputPath = path.join(tmpDir, `in_${uid}.mp4`)
@@ -564,12 +589,15 @@ app.post('/api/workflow/burn-preview', async (req, res) => {
   let segmentLinePaths = []
 
   try {
-    const response = await fetch(videoUrl)
-    if (!response.ok) {
-      return res.status(502).json({ ok: false, code: 'video_download_failed', error: `下载视频失败(${response.status})` })
+    const requestOrigin = `${req.protocol}://${req.get('host')}`
+    const parsedVideoUrl = new URL(videoUrl, requestOrigin)
+    if (parsedVideoUrl.origin === requestOrigin && parsedVideoUrl.pathname.startsWith('/user-data/tmp/')) {
+      const sourceName = path.basename(decodeURIComponent(parsedVideoUrl.pathname))
+      if (!sourceName) throw new Error('本机预览地址无效')
+      await fs.promises.copyFile(path.join(tempRoot, sourceName), inputPath)
+    } else {
+      await downloadToFile(parsedVideoUrl.href, inputPath, { maxBytes: maxMediaBytes })
     }
-    const buf = Buffer.from(await response.arrayBuffer())
-    fs.writeFileSync(inputPath, buf)
     fs.writeFileSync(titlePath, titleText || ' ', 'utf8')
 
     const { width: videoW } = probeVideoDisplaySize(inputPath)
@@ -679,9 +707,32 @@ app.post('/api/workflow/burn-preview', async (req, res) => {
   }
 })
 
-const PORT = Number(process.env.PORT || 8787)
+app.use((error, _req, res, next) => {
+  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ ok: false, code: 'file_too_large', error: '文件过大，单个媒体文件不能超过 2 GB' })
+  }
+  return next(error)
+})
+
+const distRoot = path.join(projectRoot, 'dist')
+if (fs.existsSync(distRoot)) {
+  app.use(express.static(distRoot))
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path.startsWith('/user-data/')) return next()
+    return res.sendFile(path.join(distRoot, 'index.html'))
+  })
+}
+
+const PORT = Number(process.env.PORT ?? 0)
 const HOST = process.env.HOST || '127.0.0.1'
 
-app.listen(PORT, HOST, () => {
-  console.log(`[local-api] listening on http://${HOST}:${PORT}`)
+const server = app.listen(PORT, HOST, () => {
+  const address = server.address()
+  const actualPort = typeof address === 'object' && address ? address.port : PORT
+  const url = `http://${HOST}:${actualPort}`
+  console.log(`[x-doctor] 已启动：${url}`)
+  console.log(`[x-doctor] 本机数据：${appDataRoot}`)
+  if (process.env.OPEN_BROWSER === '1' && process.platform === 'win32') {
+    execFile('cmd.exe', ['/d', '/s', '/c', `start "" "${url}"`], () => {})
+  }
 })
